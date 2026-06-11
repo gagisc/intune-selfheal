@@ -1,0 +1,85 @@
+name: Repo validation
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python (for yamllint)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install linters
+        run: |
+          python -m pip install --upgrade pip
+          pip install yamllint jsonschema
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Install PowerShell and PSScriptAnalyzer
+        uses: actions/setup-powershell@v4
+        with:
+          pwsh-version: 'latest'
+      - name: Install PSScriptAnalyzer module
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+
+      - name: YAML lint
+        run: |
+          yamllint -c <(cat <<'YAML'
+          extends: default
+          rules:
+            line-length: disable
+          YAML
+          ) $(git ls-files '*.yml' '*.yaml' || true)
+
+      - name: JSON syntax check
+        run: |
+          for f in $(git ls-files '*.json' || true); do
+            python -c "import json,sys; json.load(open('$f'))" || (echo "Invalid JSON: $f" && exit 1)
+          done
+
+      - name: Shellcheck for shell scripts
+        run: |
+          files=$(git ls-files '*.sh' || true)
+          if [ -n "$files" ]; then
+            shellcheck $files
+          fi
+
+      - name: PowerShell lint (PSScriptAnalyzer)
+        shell: pwsh
+        run: |
+          $psFiles = git ls-files '*.ps1'
+          if ($psFiles) {
+            foreach ($f in $psFiles) {
+              Write-Host "Analyzing $f"
+              Invoke-ScriptAnalyzer -Path $f -Recurse -Severity Error | Format-Table -AutoSize
+            }
+          } else {
+            Write-Host "No PowerShell files to analyze"
+          }
+
+      - name: Basic repo sanity
+        run: |
+          for req in README.md runbooks/remediate-intune.ps1 runbooks/loganalytics.ps1 runbooks/servicenow_oauth.ps1 device-scripts/refresh-mdm.ps1 logs/README.md; do
+            if [ ! -f "$req" ]; then
+              echo "Missing required file: $req"
+              exit 1
+            fi
+          done
+
+      - name: Success
+        run: echo "Validation passed"

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2016-06-01/Microsoft.Logic.json",
+  "contentVersion": "1.0.0.0",
+  "parameters": {},
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "IntuneSelfHealOrchestrator",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "definition": {
+          "triggers": {
+            "Recurrence": {
+              "type": "Recurrence",
+              "recurrence": { "frequency": "Minute", "interval": 15 }
+            }
+          },
+          "actions": {
+            "Query_Intune": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/microsoft.graph.getManagedDevices", 
+                "headers": { "Content-Type": "application/json" },
+                "body": { "filter": "((enrollmentState ne 'Enrolled') or (complianceState ne 'Compliant'))" }
+              }
+            },
+            "For_each_device": {
+              "type": "Foreach",
+              "foreach": "@body('Query_Intune')?['value']",
+              "actions": {
+                "Start_Runbook": {
+                  "type": "ApiConnection",
+                  "inputs": {
+                    "host": { "connection": { "name": "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Automation/automationAccounts/<acct>" } },
+                    "method": "post",
+                    "path": "/runbooks/remediate-intune/start",
+                    "body": { "DeviceId": "@item()?['id']" }
+                  }
+                }
+              }
+            }
+          },
+          "outputs": {}
+        },
+        "parameters": {}
+      }
+    }
+  ]
+}
