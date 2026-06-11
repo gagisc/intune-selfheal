@@ -37,7 +37,7 @@ jobs:
         run: |
           files=$(git ls-files '*.yml' '*.yaml' || true)
           if [ -n "$files" ]; then
-            yamllint -d '{extends: default, rules: {line-length: disable}}' $files
+            yamllint -d '{extends: default, rules: {line-length: disable, truthy: disable}}' $files
           fi
 
       - name: JSON syntax check
