@@ -62,9 +62,9 @@ function Send-LogAnalyticsEvent {
   $keyBytes = [Convert]::FromBase64String($sharedKey)
   $hash = [System.Security.Cryptography.HMACSHA256]::new($keyBytes).ComputeHash($bytesToHash)
   $encodedHash = [Convert]::ToBase64String($hash)
-  $auth = "SharedKey $customerId:$encodedHash"
+  $auth = "SharedKey $($customerId):$encodedHash"
 
-  $uri = "https://$customerId.ods.opinsights.azure.com/api/logs?api-version=2016-04-01"
+  $uri = "https://$($customerId).ods.opinsights.azure.com/api/logs?api-version=2016-04-01"
 
   try {
     $headers = @{
@@ -74,7 +74,7 @@ function Send-LogAnalyticsEvent {
       "time-generated-field" = ""
       "Content-Type"  = "application/json"
     }
-    $resp = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body -ErrorAction Stop
+    $null = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body -ErrorAction Stop
     Write-Output "Log Analytics ingestion accepted"
     return $true
   } catch {

@@ -12,20 +12,29 @@ function New-ServiceNowIncident {
     [Parameter(Mandatory=$true)][string] $ShortDescription,
     [Parameter(Mandatory=$true)][string] $Description,
     [string] $Category = "IT Operations",
-    [string] $Priority = "3"
+    [string] $Priority = "3",
+    [string] $Instance = $env:SERVICENOW_INSTANCE,
+    [System.Management.Automation.PSCredential] $Credential,
+    [string] $CredentialName = $env:SERVICENOW_CREDENTIAL_ASSET
   )
 
-  # Placeholder: retrieve credentials from Key Vault or Automation variables
-  $snInstance = "<SERVICENOW_INSTANCE>"            # e.g., dev123.service-now.com
-  $snUser = "<SERVICENOW_USER>"
-  $snPass = "<SERVICENOW_PASSWORD>"
+  if (-not $Credential) {
+    if (-not [string]::IsNullOrWhiteSpace($CredentialName) -and (Get-Command Get-AutomationPSCredential -ErrorAction SilentlyContinue)) {
+      $Credential = Get-AutomationPSCredential -Name $CredentialName
+    }
 
-  if ($snInstance -like "<*>" -or $snUser -like "<*>" -or $snPass -like "<*>") {
+    if (-not $Credential) {
+      Write-Warning "ServiceNow credentials not configured. Skipping incident creation."
+      return $null
+    }
+  }
+
+  if ([string]::IsNullOrWhiteSpace($Instance)) {
     Write-Warning "ServiceNow credentials not configured. Skipping incident creation."
     return $null
   }
 
-  $uri = "https://$snInstance/api/now/table/incident"
+  $uri = "https://$Instance/api/now/table/incident"
   $body = @{
     short_description = $ShortDescription
     description       = $Description
@@ -34,7 +43,7 @@ function New-ServiceNowIncident {
     caller_id         = "automation"
   } | ConvertTo-Json
 
-  $pair = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("$snUser`:$snPass"))
+  $pair = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("$($Credential.UserName)`:$($Credential.GetNetworkCredential().Password)"))
   $headers = @{
     Authorization = "Basic $pair"
     Accept        = "application/json"
