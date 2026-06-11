@@ -25,7 +25,7 @@ try {
   exit 2
 }
 
-function Try-RemoteSync {
+function Invoke-RemoteSync {
   param($id)
   try {
     Invoke-MgDeviceManagementManagedDeviceSyncDevice -ManagedDeviceId $id -ErrorAction Stop
@@ -49,13 +49,10 @@ function Get-DeviceStatus {
 
 # 1) Try remote sync
 if (-not $WhatIf) {
-  #$syncOk = Try-RemoteSync -id $DeviceId
-  # before: $syncOk = Try-RemoteSync -id $DeviceId
-# use it:
-$syncOk = Try-RemoteSync -id $DeviceId
-if (-not $syncOk) {
-  Write-Warning "Remote sync request failed for $DeviceId"
-}
+  $syncOk = Invoke-RemoteSync -id $DeviceId
+  if (-not $syncOk) {
+    Write-Warning "Remote sync request failed for $DeviceId"
+  }
   Start-Sleep -Seconds 20
   $status = Get-DeviceStatus -id $DeviceId
   if ($status -and $status.EnrollmentState -eq "Enrolled" -and $status.ComplianceState -eq "Compliant") {

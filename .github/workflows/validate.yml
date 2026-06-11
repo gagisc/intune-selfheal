@@ -38,12 +38,10 @@ jobs:
 
       - name: YAML lint
         run: |
-          yamllint -c <(cat <<'YAML'
-extends: default
-rules:
-  line-length: disable
-YAML
-) $(git ls-files '*.yml' '*.yaml' || true)
+          files=$(git ls-files '*.yml' '*.yaml' || true)
+          if [ -n "$files" ]; then
+            yamllint -d '{extends: default, rules: {line-length: disable}}' $files
+          fi
 
       - name: JSON syntax check
         run: |
