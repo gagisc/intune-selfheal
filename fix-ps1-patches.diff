@@ -1,0 +1,188 @@
+*** Begin Patch
+*** Update File: runbooks/loganalytics.ps1
+@@
+-    $kvUri = "https://$kvName.vault.azure.net/secrets/$workspaceSecretName?api-version=7.3"
+-    $workspaceIdResp = Invoke-RestMethod -Method Get -Uri $kvUri -Headers @{ Authorization = "Bearer $token" }
+-    $workspaceId = $workspaceIdResp.value
+-
+-    $kvKeyUri = "https://$kvName.vault.azure.net/secrets/$workspaceKeySecretName?api-version=7.3"
+-    $workspaceKeyResp = Invoke-RestMethod -Method Get -Uri $kvKeyUri -Headers @{ Authorization = "Bearer $token" }
+-    $workspaceKey = $workspaceKeyResp.value
++    # Use explicit variable delimiting to avoid parse errors when concatenating hostnames
++    $kvUri = "https://${kvName}.vault.azure.net/secrets/$workspaceSecretName?api-version=7.3"
++    $workspaceIdResp = Invoke-RestMethod -Method Get -Uri $kvUri -Headers @{ Authorization = "Bearer $token" }
++    $workspaceId = $workspaceIdResp.value
++
++    $kvKeyUri = "https://${kvName}.vault.azure.net/secrets/$workspaceKeySecretName?api-version=7.3"
++    $workspaceKeyResp = Invoke-RestMethod -Method Get -Uri $kvKeyUri -Headers @{ Authorization = "Bearer $token" }
++    $workspaceKey = $workspaceKeyResp.value
+*** End Patch
+*** Begin Patch
+*** Update File: runbooks/remediate-intune.ps1
+@@
+-function Try-RemoteSync {
+-  param($id)
+-  try {
+-    Invoke-MgDeviceManagementManagedDeviceSyncDevice -ManagedDeviceId $id -ErrorAction Stop
+-    Write-Output "Sync requested for $id"
+-    return $true
+-  } catch {
+-    Write-Warning "Remote sync failed: $_"
+-    return $false
+-  }
+-}
++function Invoke-RemoteSync {
++  [CmdletBinding()]
++  param(
++    [Parameter(Mandatory=$true)][string] $Id
++  )
++  try {
++    Invoke-MgDeviceManagementManagedDeviceSyncDevice -ManagedDeviceId $Id -ErrorAction Stop
++    Write-Output "Sync requested for $Id"
++    return $true
++  } catch {
++    Write-Warning "Remote sync failed for $Id: $($_.Exception.Message)"
++    return $false
++  }
++}
+@@
+-# 1) Try remote sync
+-if (-not $WhatIf) {
+-  $syncOk = Try-RemoteSync -id $DeviceId
+-  Start-Sleep -Seconds 20
+-  $status = Get-DeviceStatus -id $DeviceId
+-  if ($status -and $status.EnrollmentState -eq "Enrolled" -and $status.ComplianceState -eq "Compliant") {
+-    Write-Output "Device $DeviceId is healthy after sync."
+-    Disconnect-MgGraph
+-    exit 0
+-  }
+-}
++# 1) Try remote sync
++if (-not $WhatIf) {
++  $syncOk = Invoke-RemoteSync -Id $DeviceId
++  Start-Sleep -Seconds 20
++  $status = Get-DeviceStatus -id $DeviceId
++  if ($syncOk -and $status -and $status.EnrollmentState -eq "Enrolled" -and $status.ComplianceState -eq "Compliant") {
++    Write-Output "Device $DeviceId is healthy after sync."
++    Disconnect-MgGraph
++    exit 0
++  } elseif (-not $syncOk) {
++    Write-Warning "Remote sync was requested but reported failure for $DeviceId; continuing to remediation steps."
++  }
++}
+@@
+-try {
+-  # Create a run request
+-  $runReq = Invoke-MgDeviceManagementDeviceManagementScriptRun -DeviceManagementScriptId $scriptId -ManagedDeviceIds @($DeviceId)
+-  Write-Output "Triggered device script run: $($runReq.Id)"
+-} catch {
+-  Write-Warning "Failed to trigger device script: $_"
+-  Disconnect-MgGraph
+-  exit 4
+-}
+-
+-# Poll for result (simple loop)
+-$attempts = 0
+-while ($attempts -lt 12) {
+-  Start-Sleep -Seconds 15
+-  $attempts++
+-  # Query device run states (simplified)
+-  try {
+-    $runs = Get-MgDeviceManagementDeviceManagementScriptDeviceRunSummary -DeviceManagementScriptId $scriptId -ErrorAction Stop
+-    # Note: In production, query the specific device run status via the appropriate Graph endpoint
+-    Write-Output "Polled run summary (attempt $attempts)"
+-  } catch {
+-    Write-Warning "Polling failed: $_"
+-  }
+-}
++try {
++  # Create a run request
++  $runReq = Invoke-MgDeviceManagementDeviceManagementScriptRun -DeviceManagementScriptId $scriptId -ManagedDeviceIds @($DeviceId) -ErrorAction Stop
++  Write-Output "Triggered device script run: $($runReq.Id)"
++} catch {
++  Write-Error "Failed to trigger device script for $DeviceId: $($_.Exception.Message)"
++  Disconnect-MgGraph
++  exit 4
++}
++
++# Poll for result (simple loop) and inspect run summary for this device
++$attempts = 0
++while ($attempts -lt 12) {
++  Start-Sleep -Seconds 15
++  $attempts++
++  try {
++    $runs = Get-MgDeviceManagementDeviceManagementScriptDeviceRunSummary -DeviceManagementScriptId $scriptId -ErrorAction Stop
++    # Find the run entry for this device (if present) and log status
++    $deviceRun = $runs.value | Where-Object { $_.managedDeviceId -eq $DeviceId } 2>$null
++    if ($deviceRun) {
++      Write-Output "Device script run state for $DeviceId: $($deviceRun.status)"
++      if ($deviceRun.status -in @('success','completed')) {
++        break
++      }
++    } else {
++      Write-Output "No run entry yet for $DeviceId (attempt $attempts)"
++    }
++  } catch {
++    Write-Warning "Polling failed on attempt $attempts: $($_.Exception.Message)"
++  }
++}
+*** End Patch
+*** Begin Patch
+*** Update File: runbooks/remediate-intune.ps1
+@@
+-} catch {
+-  Write-Warning "Remediation failed for $DeviceId"
+-  Disconnect-MgGraph
+-  exit 5
+-}
++} catch {
++  Write-Error "Remediation failed for $DeviceId: $($_.Exception.Message)"
++  Disconnect-MgGraph
++  throw
++}
+*** End Patch
+*** Begin Patch
+*** Update File: runbooks/servicenow_oauth.ps1
+@@
+-function New-ServiceNowIncidentOAuth {
+-  param(
+-    [Parameter(Mandatory=$true)][string] $ShortDescription,
+-    [Parameter(Mandatory=$true)][string] $Description,
+-    [string] $Priority = "3",
+-    [string] $Category = "IT Operations"
+-  )
++function New-ServiceNowIncidentOAuth {
++  [CmdletBinding(SupportsShouldProcess=$true)]
++  param(
++    [Parameter(Mandatory=$true)][string] $ShortDescription,
++    [Parameter(Mandatory=$true)][string] $Description,
++    [string] $Priority = "3",
++    [string] $Category = "IT Operations"
++  )
+ 
+   # Key Vault and secret names - set via environment or Automation variables
+   $kvName = $env:KV_NAME
+@@
+-  try {
+-    # Acquire OAuth token from ServiceNow
+-    $tokenResp = Invoke-RestMethod -Method Post -Uri $tokenUrl -Body @{ grant_type = "client_credentials" } -Headers @{ Authorization = ("Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$clientId`:$clientSecret"))) } -ErrorAction Stop
+-    $accessToken = $tokenResp.access_token
+-  } catch {
+-    Write-Warning "Failed to acquire ServiceNow OAuth token: $_"
+-    return $null
+-  }
++  # Respect ShouldProcess for safety in automation
++  if (-not $PSCmdlet.ShouldProcess("ServiceNow", "Create incident: $ShortDescription")) {
++    Write-Verbose "ShouldProcess declined; skipping ServiceNow incident creation."
++    return $null
++  }
++
++  try {
++    # Acquire OAuth token from ServiceNow
++    $tokenResp = Invoke-RestMethod -Method Post -Uri $tokenUrl -Body @{ grant_type = "client_credentials" } -Headers @{ Authorization = ("Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$clientId`:$clientSecret"))) } -ErrorAction Stop
++    $accessToken = $tokenResp.access_token
++  } catch {
++    Write-Warning "Failed to acquire ServiceNow OAuth token: $($_.Exception.Message)"
++    return $null
++  }
+*** End Patch

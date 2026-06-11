@@ -49,7 +49,13 @@ function Get-DeviceStatus {
 
 # 1) Try remote sync
 if (-not $WhatIf) {
-  $syncOk = Try-RemoteSync -id $DeviceId
+  #$syncOk = Try-RemoteSync -id $DeviceId
+  # before: $syncOk = Try-RemoteSync -id $DeviceId
+# use it:
+$syncOk = Try-RemoteSync -id $DeviceId
+if (-not $syncOk) {
+  Write-Warning "Remote sync request failed for $DeviceId"
+}
   Start-Sleep -Seconds 20
   $status = Get-DeviceStatus -id $DeviceId
   if ($status -and $status.EnrollmentState -eq "Enrolled" -and $status.ComplianceState -eq "Compliant") {
@@ -88,6 +94,11 @@ while ($attempts -lt 12) {
   # Query device run states (simplified)
   try {
     $runs = Get-MgDeviceManagementDeviceManagementScriptDeviceRunSummary -DeviceManagementScriptId $scriptId -ErrorAction Stop
+    # examine $runs for the device and status
+    $deviceRun = $runs.value | Where-Object { $_.managedDeviceId -eq $DeviceId }
+    if ($deviceRun) {
+      Write-Output "Device script run state: $($deviceRun.status)"
+    }
     # Note: In production, query the specific device run status via the appropriate Graph endpoint
     Write-Output "Polled run summary (attempt $attempts)"
   } catch {

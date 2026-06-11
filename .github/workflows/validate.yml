@@ -28,10 +28,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
 
-      - name: Install PowerShell and PSScriptAnalyzer
-        uses: actions/setup-powershell@v4
-        with:
-          pwsh-version: 'latest'
+      - name: Set up PowerShell (official action)
+        uses: actions/setup-powershell@v2
+
       - name: Install PSScriptAnalyzer module
         shell: pwsh
         run: |
@@ -40,11 +39,11 @@ jobs:
       - name: YAML lint
         run: |
           yamllint -c <(cat <<'YAML'
-          extends: default
-          rules:
-            line-length: disable
-          YAML
-          ) $(git ls-files '*.yml' '*.yaml' || true)
+extends: default
+rules:
+  line-length: disable
+YAML
+) $(git ls-files '*.yml' '*.yaml' || true)
 
       - name: JSON syntax check
         run: |
